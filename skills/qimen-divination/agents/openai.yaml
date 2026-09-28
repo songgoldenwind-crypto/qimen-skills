@@ -1,0 +1,4 @@
+interface:
+  display_name: "奇门遁甲"
+  short_description: "独立奇门排盘、主客分类占、应期与专用取象；默认时家转盘置闰"
+  default_prompt: "使用 $qimen-divination 分析这件事，先核时间、盘式和方法条件，再给出判断及应期。"
