@@ -25,8 +25,8 @@ else
   git -C "$source_dir" checkout --quiet "$revision"
 fi
 
-"$engine_dir/.venv/bin/python" "$engine_dir/paipan.py" --family 刻家 --datetime 2026-09-21T14:09:59 \
+"$engine_dir/.venv/bin/python" "$engine_dir/paipan.py" --purpose chart-only --family 刻家 --datetime 2026-09-21T14:09:59 \
   | "$engine_dir/.venv/bin/python" -c 'import json,sys; p=json.load(sys.stdin); assert p["chart_granularity_minutes"] == 10; assert p["raw"]["干支"].endswith("庚午分")'
-"$engine_dir/.venv/bin/python" "$engine_dir/paipan.py" --family 刻家 --datetime 2026-09-21T14:10:00 \
+"$engine_dir/.venv/bin/python" "$engine_dir/paipan.py" --purpose chart-only --family 刻家 --datetime 2026-09-21T14:10:00 \
   | "$engine_dir/.venv/bin/python" -c 'import json,sys; p=json.load(sys.stdin); assert p["raw"]["干支"].endswith("辛未分")'
 echo 'ke qimen engine ready: pinned 10-minute boundary samples passed'

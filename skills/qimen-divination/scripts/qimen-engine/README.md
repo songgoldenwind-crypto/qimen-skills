@@ -1,45 +1,55 @@
-# 奇门排盘引擎
+# 排盘引擎与程序入口
 
-`paipan.py`只调用和归一化外部引擎，不自行计算局数或九宫。默认时家阳盘转盘置闰使用固定版本Go引擎，源码随Skill交付，版本与许可见[第三方声明](../../THIRD_PARTY_NOTICES.md)。副本仅清理资料出处相关注释，计算语句保留。
+默认计算来自固定提交 `8eb06d007d4a5fcc5352d9054f81469e5f023f45` 的 `atopx/qimen`。随包Go源码保留计算和测试，附JSON导出命令并清理资料出处相关注释。Python适配器只检查输入、选路、调用程序和归一化字段，不重写起局公式。软件链接与许可证见[第三方声明](../../THIRD_PARTY_NOTICES.md)。
 
-## 默认构建
+## 配套断盘入口
 
-需要Python 3.10或更新版本、Go 1.26工具链。首次构建可能下载Go工具链；生成的本机二进制不随包分发。从Skill目录运行：
+需要Python 3.10+和Go 1.26。从本Skill目录运行：
 
 ```bash
 bash scripts/qimen-engine/setup-atopx.sh
-python3 scripts/qimen-engine/paipan.py --datetime 2020-04-18T14:00 --timezone Asia/Shanghai --number 7
-python3 scripts/qimen-engine/paipan.py --family 时家 --datetime 2020-10-07T14:23 --style 飞盘
-python3 scripts/qimen-engine/paipan.py --family 日家 --datetime 2020-10-07T14:23
+python3 scripts/qimen-engine/paipan.py --purpose reading --datetime 2020-04-18T14:00 --timezone Asia/Shanghai --number 7
 ```
 
-支持时、刻、日、月、年家。飞盘仅用于Go引擎时／日／月／年家；时／日家可选置闰或拆补，月／年家不使用这一选项。默认仅核固定时家转盘置闰样例的指定字段；其他模式保留程序盘及未核范围，见[样盘检查](../../references/10-validation-boundaries.md)和[排盘路由](../../references/09-chart-routing.md)。
+`reading`是默认模式，仅允许atopx、时家、转盘、置闰和Asia/Shanghai民用时。报数可选1～9，5转坤2。程序检查八宫天／地干、门、星、神及时空是否齐备，缺项时停止。引擎或安装失败不自动换算法。
 
-## 可选10分钟刻家
+## 仅展示程序盘
 
-明确要求刻家才安装。需uv、Git、C++编译器及本地Python依赖；固定提交源码与虚拟环境在本机生成，不包含在交付ZIP中。
+其他算法没有本版配套断法，只在明确查看计算结果时调用 `--purpose chart-only`。输出 `interpretation.allowed=false`，禁止读取时间盘断法或使用报数。
+
+```bash
+python3 scripts/qimen-engine/paipan.py --purpose chart-only --datetime 2020-10-07T14:23 --style 飞盘
+python3 scripts/qimen-engine/paipan.py --purpose chart-only --datetime 2020-10-07T14:23 --method 拆补
+python3 scripts/qimen-engine/paipan.py --purpose chart-only --datetime 2020-10-07T14:23 --family 日家
+```
+
+Go引擎的时／日家可选转盘／飞盘、置闰／拆补；月／年家可选转盘／飞盘但不接拆补，程序固定阴遁。飞盘缺门或神的宫保留null。未与对应方法样盘逐项匹配，不由这些程序字段引入新理论。
+
+## 可选计算依赖
+
+刻家需要uv、Git、C++编译器，脚本安装固定版本Python依赖及固定提交源码。只能上海时区、转盘、上游 `pan_minute(2)`，不接拆补或报数。源码与环境在本机生成，不随ZIP分发。
 
 ```bash
 bash scripts/qimen-engine/setup-ke.sh
-python3 scripts/qimen-engine/paipan.py --family 刻家 --datetime 2026-09-21T14:23:30 --timezone Asia/Shanghai
+python3 scripts/qimen-engine/paipan.py --purpose chart-only --family 刻家 --datetime 2026-09-21T14:23:30 --timezone Asia/Shanghai
 ```
 
-刻家仅限转盘、`pan_minute(2)`、上海时区，不接报数或拆补。上游虽标置闰，排局函数并不接收置闰／拆补参数；二遁按时支、三元按时柱，故为独立算法。已核10分钟边界、多日运行与八宫字段，专用断法未核。上游旬空中的日空来自时柱、时空来自分柱，归一化标为 `hour`／`minute`，真正日空保留 `null`。
+提交为 `e6680ac4ca0b0da5ce3fe637e05f9fc32066ec5a`，该代码每10分钟换分柱；只检查运行、指定八宫字段和时间边界。本版不提供专用刻家断法。旬空输出来自时柱和分柱，分别标hour和minute，日空为null。
 
-## 可选旧时家对照
-
-仅明确要求旧引擎比较时安装调用，不因默认依赖缺失自动换引擎。
+旧时家计算固定PyPI `kinqimen==0.0.6.6`，只作程序盘对照，不接报数，不改计算。它的局数及神名与默认样例有差异。
 
 ```bash
 bash scripts/qimen-engine/setup.sh
-scripts/qimen-engine/.venv/bin/python scripts/qimen-engine/paipan.py --engine kinqimen --family 时家 --datetime 2020-04-18T14:00 --method 拆补
+scripts/qimen-engine/.venv/bin/python scripts/qimen-engine/paipan.py --purpose chart-only --engine kinqimen --datetime 2020-04-18T14:00 --method 拆补
 ```
 
-旧时家固定PyPI 0.0.6.6。适配器只修正绝对导入路径，不改计算。该版刻家对部分日期报错，不能代替单独固定的刻家提交。不同引擎的局数、星神名称和起局差异分别保留，不能拼盘。
+## 时间与输出
 
-## 输出与测试
+输入当地墙钟时间，IANA时区另填。断盘只核上海民用时，不校真太阳时；其他时区参数只保留标记，不能视作已处理跨区交节。秒数用于记录，不承诺秒级换盘。
 
-`--datetime`是当地民用时间，可记录秒；`--timezone`为IANA时区，不校正真太阳时。秒数记录与换盘粒度不同。输出保留 `engine`、版本、`route`、原始 `raw`、九宫 `palaces`、旬空和 `validation_scope`。飞盘缺门或缺神字段为 `null`，不是吉凶判断。引擎失败或字段不完整直接报错，不补造盘面。
+JSON保留原始raw、palaces、engine及版本、route、validation_scope和interpretation。`interpretation.allowed`是方法与字段的使用标记，不是准确率。默认时家空亡来自时柱；day_void与日空null不表示无日空。值符值使分别保留原宫、落宫和盘面宫。软件原值不因断语改变。
+
+## 测试
 
 ```bash
 go -C scripts/qimen-engine/atopx-src test ./...
@@ -47,4 +57,4 @@ python3 -m unittest discover -s scripts/tests -v
 python3 -m unittest discover -s scripts/qimen-engine/tests -v
 ```
 
-未安装可选依赖时，对应测试明确跳过；不得据跳过声称已验证可选盘。构建检查与固定样例仍须通过。
+可选依赖安装后，用 `.venv/bin/python` 运行排盘测试才能检查旧引擎；未安装时对应测试跳过。固定样例与规则范围见[验证边界](../../references/10-validation-boundaries.md)。

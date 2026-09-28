@@ -25,6 +25,43 @@ JU_DIGITS = "零一二三四五六七八九"
 PALACES = {1: "坎", 2: "坤", 3: "震", 4: "巽", 5: "中", 6: "乾", 7: "兌", 8: "艮", 9: "離"}
 BRANCH_PALACE = dict(zip("子丑寅卯辰巳午未申酉戌亥", (1, 8, 8, 3, 4, 4, 9, 2, 2, 7, 6, 6)))
 SPIRIT_NAMES = {"符": "值符", "蛇": "螣蛇", "陰": "太陰", "合": "六合", "虎": "白虎", "玄": "玄武", "勾": "勾陈", "雀": "朱雀", "地": "九地", "天": "九天"}
+READING_RULE_SET = "时家阳盘转盘置闰"
+READING_PALACES = ("1", "2", "3", "4", "6", "7", "8", "9")
+
+
+def supports_rules(family: str, style: str, method: str, engine: str) -> bool:
+    return (family, style, method, engine) == ("时家", "转盘", "置闰", "atopx")
+
+
+def interpretation_support(local: datetime, family: str, style: str, method: str,
+                           engine: str, palaces: dict) -> dict:
+    """Check the published rules' route and input fields, not forecast accuracy."""
+    if not supports_rules(family, style, method, engine):
+        return {"allowed": False, "rule_set": None, "reason": "此算法仅供排盘展示，本版没有配套断法", "missing_fields": []}
+    if getattr(local.tzinfo, "key", None) != "Asia/Shanghai":
+        return {"allowed": False, "rule_set": None, "reason": "本版断盘仅核Asia/Shanghai民用时间；其他时区未适配", "missing_fields": []}
+    missing = []
+    for number in READING_PALACES:
+        palace = palaces.get(number, {})
+        for key in ("sky_stem", "earth_stem", "door", "star", "spirit"):
+            if not isinstance(palace.get(key), str) or not palace[key]:
+                missing.append(f"palaces.{number}.{key}")
+        if not isinstance(palace.get("hour_void"), bool):
+            missing.append(f"palaces.{number}.hour_void")
+    return {"allowed": not missing, "rule_set": READING_RULE_SET,
+            "reason": "盘法与本版规则匹配；样例核验范围见validation_scope" if not missing else "八宫必要字段不完整，不允许断盘",
+            "missing_fields": missing}
+
+
+def require_reading_route(local: datetime, family: str, style: str, method: str,
+                          engine: str, purpose: str, number: int | None) -> None:
+    if number is not None and (purpose != "reading" or not supports_rules(family, style, method, engine)):
+        raise ValueError("报数锁宫仅配套reading模式的atopx时家转盘置闰")
+    if purpose == "reading":
+        if not supports_rules(family, style, method, engine):
+            raise ValueError("此算法没有配套断法；只看程序盘请显式添加 --purpose chart-only")
+        if getattr(local.tzinfo, "key", None) != "Asia/Shanghai":
+            raise ValueError("断盘仅支持已核的Asia/Shanghai民用时间；其他时区仅可用 --purpose chart-only 展示未核程序盘")
 
 
 def load_engine():
@@ -46,6 +83,8 @@ def load_engine():
 
 
 def parse_local_time(value: str, timezone: str) -> datetime:
+    if "T" not in value or ":" not in value.partition("T")[2]:
+        raise ValueError("--datetime 必须明确提供 YYYY-MM-DDTHH:MM[:SS]，不能补造日期或小时后的分钟")
     try:
         local = datetime.fromisoformat(value)
     except ValueError as exc:
@@ -130,6 +169,7 @@ def build_chart(local: datetime, number: int | None, method: str = "置闰") -> 
         "void_branches": {"day": day_void_branches, "hour": hour_void_branches},
         "raw": raw,
         "palaces": palaces,
+        "interpretation": interpretation_support(local, "时家", "转盘", method, "kinqimen", palaces),
     }
 
 
@@ -205,6 +245,7 @@ def build_ke_chart(local: datetime, method: str = "置闰") -> dict:
                           "day": None, "upstream_raw": raw["旬空"]},
         "raw": raw,
         "palaces": palaces,
+        "interpretation": interpretation_support(local, "刻家", "转盘", method, "kinqimen-ke", palaces),
     }
 
 
@@ -267,9 +308,12 @@ def build_atopx_chart(
         "reported_number": number,
         "locked_palace": locked,
         "five_redirected_to_two": number == 5,
-        "void_branches": {"lead": "".join(raw["旬空"]), "day": None},
+        "void_branches": {"lead": "".join(raw["旬空"]),
+                          "hour": "".join(raw["旬空"]) if family == "时家" else None,
+                          "day": "".join(raw["旬空"]) if family == "日家" else None},
         "raw": raw,
         "palaces": palaces,
+        "interpretation": interpretation_support(local, family, style, method, "atopx", palaces),
     }
 
 
@@ -282,16 +326,23 @@ def main() -> int:
     parser.add_argument("--style", choices=STYLES, default="转盘", help="飞盘只在 atopx 中可用")
     parser.add_argument("--number", type=int, choices=range(1, 10), metavar="1..9", help="问测人预先报出的数")
     parser.add_argument("--method", choices=ENGINE_METHODS, default="置闰", help="时家/日家选置闰或拆补；不能按结果自动切换")
+    parser.add_argument("--purpose", choices=("reading", "chart-only"), default="reading", help="reading仅配默认已适配规则；chart-only只展示程序盘，禁止套用断法")
     args = parser.parse_args()
     try:
         local = parse_local_time(args.datetime, args.timezone)
         engine = resolve_route(args.family, args.style, args.method, args.number, args.engine)
+        require_reading_route(local, args.family, args.style, args.method, engine, args.purpose, args.number)
         if engine == "kinqimen-ke":
             chart = build_ke_chart(local, args.method)
         elif engine == "kinqimen":
             chart = build_chart(local, args.number, args.method)
         else:
             chart = build_atopx_chart(local, args.number, args.method, args.family, args.style)
+        if args.purpose == "reading" and not chart["interpretation"]["allowed"]:
+            raise RuntimeError(chart["interpretation"]["reason"] + ": " + ", ".join(chart["interpretation"]["missing_fields"]))
+        if args.purpose == "chart-only":
+            chart["interpretation"]["allowed"] = False
+            chart["interpretation"]["reason"] = "请求为排盘展示，不启用断法"
     except (ValueError, RuntimeError) as exc:
         parser.exit(2, f"error: {exc}\n")
     raw_dun = chart["raw"].get("阴阳遁", chart["raw"].get("排局", ""))
@@ -310,6 +361,7 @@ def main() -> int:
         "style": args.style,
         "rule_requested": args.method if args.family in {"时家", "日家"} else ("上游 pan_minute(2)" if args.family == "刻家" else "不适用"),
         "engine": engine,
+        "purpose": args.purpose,
         "yin_yang_dun": dun,
         "yin_yang_source": dun_basis,
     }

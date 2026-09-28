@@ -2,6 +2,7 @@ import importlib.util
 import json
 import subprocess
 import unittest
+from copy import deepcopy
 from pathlib import Path
 
 
@@ -11,6 +12,7 @@ paipan = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(paipan)
 
 
+@unittest.skipUnless(importlib.util.find_spec("kinqimen") is not None, "未安装可选旧时家依赖")
 class KinQiMenChartTest(unittest.TestCase):
     def test_reference_sample_hour_chart(self):
         local = paipan.parse_local_time("2020-10-07T14:23", "Asia/Shanghai")
@@ -22,6 +24,7 @@ class KinQiMenChartTest(unittest.TestCase):
         self.assertEqual(chart["palaces"]["3"]["stem_pair"], "壬+辛")
         self.assertEqual(chart["method"], "时家奇门/阳盘/转盘/置闰")
         self.assertTrue(chart["palaces"]["7"]["day_void"])
+        self.assertFalse(chart["interpretation"]["allowed"])
 
     def test_reference_examples_show_method_disagreement(self):
         # Fixed comparison cases show a difference between the two rule engines.
@@ -135,11 +138,12 @@ class KeChartTest(unittest.TestCase):
 
     def test_ke_is_explicit_and_cannot_accept_hour_number(self):
         python = MODULE_PATH.parent / ".venv" / "bin" / "python"
-        base = [str(python), str(MODULE_PATH), "--family", "刻家", "--datetime", "2026-09-21T14:23"]
+        base = [str(python), str(MODULE_PATH), "--purpose", "chart-only", "--family", "刻家", "--datetime", "2026-09-21T14:23"]
         result = subprocess.run(base, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["method"], "刻家奇门/10分钟/转盘/上游标注置闰")
         self.assertEqual(json.loads(result.stdout)["route"]["engine"], "kinqimen-ke")
+        self.assertFalse(json.loads(result.stdout)["interpretation"]["allowed"])
         rejected = subprocess.run(base + ["--number", "3"], capture_output=True, text=True)
         self.assertEqual(rejected.returncode, 2)
         self.assertIn("不套用", rejected.stderr)
@@ -152,10 +156,11 @@ class KeChartTest(unittest.TestCase):
         python = MODULE_PATH.parent / ".venv" / "bin" / "python"
         base = [str(python), str(MODULE_PATH), "--datetime", "2026-12-21T14:20"]
         hour = json.loads(subprocess.check_output(base))
-        ke = json.loads(subprocess.check_output(base + ["--family", "刻家"]))
+        ke = json.loads(subprocess.check_output(base + ["--purpose", "chart-only", "--family", "刻家"]))
         self.assertEqual(hour["route"]["yin_yang_dun"], "阳遁")
         self.assertEqual(ke["route"]["yin_yang_dun"], "阴遁")
         self.assertIn("时支", ke["route"]["yin_yang_source"])
+        self.assertFalse(ke["interpretation"]["allowed"])
 
 
 class RoutingTest(unittest.TestCase):
@@ -170,6 +175,68 @@ class RoutingTest(unittest.TestCase):
         self.assertEqual(chart["route"]["family"], "时家")
         self.assertEqual(chart["route"]["engine"], "atopx")
         self.assertEqual(chart["route"]["yin_yang_dun"], "阴遁")
+        self.assertEqual(chart["route"]["purpose"], "reading")
+        self.assertTrue(chart["interpretation"]["allowed"])
+        self.assertEqual(chart["void_branches"]["hour"], "".join(chart["raw"]["旬空"]))
+        self.assertIsNone(chart["void_branches"]["day"])
+
+    def test_unpaired_algorithms_are_rejected_before_loading_dependencies(self):
+        options = (
+            ["--engine", "kinqimen"], ["--family", "刻家"],
+            ["--family", "日家"], ["--family", "月家"], ["--family", "年家"],
+            ["--style", "飞盘"], ["--method", "拆补"],
+        )
+        for extra in options:
+            with self.subTest(extra=extra):
+                result = subprocess.run(["python3", str(MODULE_PATH), "--datetime", "2026-09-21T14:20"] + extra,
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("没有配套断法", result.stderr)
+                self.assertIn("--purpose chart-only", result.stderr)
+
+    def test_chart_only_outputs_cannot_be_used_for_reading(self):
+        options = ([], ["--style", "飞盘"], ["--method", "拆补"],
+                   ["--family", "日家"], ["--family", "月家"], ["--family", "年家"])
+        for extra in options:
+            with self.subTest(extra=extra):
+                result = subprocess.run(["python3", str(MODULE_PATH), "--purpose", "chart-only",
+                                         "--datetime", "2026-09-21T14:20"] + extra,
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                chart = json.loads(result.stdout)
+                self.assertFalse(chart["interpretation"]["allowed"])
+                self.assertEqual(chart["route"]["purpose"], "chart-only")
+                self.assertIsNone(chart["locked_palace"])
+
+    def test_reading_rejects_unadapted_timezone_and_missing_time(self):
+        result = subprocess.run(["python3", str(MODULE_PATH), "--datetime", "2026-09-21T14:20",
+                                 "--timezone", "Asia/Tokyo"], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Asia/Shanghai", result.stderr)
+        for value in ("2026-09-21", "2026-09-21T14"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                paipan.parse_local_time(value, "Asia/Shanghai")
+
+    def test_chart_only_does_not_accept_reported_numbers(self):
+        result = subprocess.run(["python3", str(MODULE_PATH), "--purpose", "chart-only",
+                                 "--datetime", "2026-09-21T14:20", "--number", "5"],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("报数锁宫", result.stderr)
+
+    def test_missing_palace_fields_disable_rule_support(self):
+        local = paipan.parse_local_time("2020-10-07T14:23", "Asia/Shanghai")
+        chart = paipan.build_atopx_chart(local, None)
+        self.assertTrue(chart["interpretation"]["allowed"])
+        self.assertIsNone(chart["palaces"]["5"]["door"])
+        for field in ("sky_stem", "earth_stem", "door", "star", "spirit", "hour_void"):
+            with self.subTest(field=field):
+                palaces = deepcopy(chart["palaces"])
+                palaces["3"][field] = None
+                support = paipan.interpretation_support(local, "时家", "转盘", "置闰", "atopx", palaces)
+                self.assertFalse(support["allowed"])
+                self.assertIn("palaces.3." + field, support["missing_fields"])
 
     def test_family_engine_and_method_boundaries(self):
         examples = (

@@ -1,4 +1,4 @@
 interface:
   display_name: "奇门遁甲"
-  short_description: "独立奇门排盘、主客分类占、应期与专用取象；默认时家转盘置闰"
-  default_prompt: "使用 $qimen-divination 分析这件事，先核时间、盘式和方法条件，再给出判断及应期。"
+  short_description: "时家阳盘转盘置闰的报数、宫位分析、出生领域与择时；其他算法只展示盘面"
+  default_prompt: "使用 $qimen-divination 按默认配套盘法分析这件事，先检查排盘输出的规则支持标记，再解释实际宫位字段。"
